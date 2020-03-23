@@ -4,6 +4,11 @@ import Data.Time
 import Data.List.Split
 import Data.Maybe
 import Data.Sort
+import Data.Set (Set)
+import Data.Char
+import qualified Data.Map as Map
+import qualified Data.Set as Set
+
 ---import Network.Wreq                  -- package wreq
 ---import Control.Lens                  -- package lens
 ---import qualified Data.ByteString.Lazy as BL
@@ -28,6 +33,26 @@ data Team = Team {
 
 type Teams = [Team]
 
+
+-- the points for each team 
+data TeamScore = TeamScore{
+                    teamname::String
+                    ,conf::String
+                    ,points::Int 
+                  } deriving (Show) 
+
+type Standings = [TeamScore]
+
+instance Eq TeamScore where
+  (TeamScore name1 conf1 points1) == (TeamScore name2 conf2 points2) = points1 == points2
+
+instance Ord TeamScore where
+  compare  (TeamScore name1 conf1 points1) (TeamScore name2 conf2 points2)  | points1 == points2 = EQ
+                                                                            | points1 < points2 = LT
+                                                                            | otherwise = GT
+                
+
+
 --- loads the teams information 
 loadTeams::String -> IO Teams    
 loadTeams fileName =   do
@@ -39,8 +64,8 @@ loadTeams fileName =   do
 --- Load the teams information 
 linetoTeam :: String -> Team 
 linetoTeam line =  let tokens = (splitOn "," line)::[String]
-                       name  = (tokens!!0) :: String 
-                       conference  = (tokens!!1) :: String   
+                       name  =  (tokens!!0) :: String 
+                       conference  =  filter (\c -> isAlpha c) $ (tokens!!1) :: String   
                    in (Team name conference ) 
 
 --- Load the NBA game results 
@@ -132,7 +157,43 @@ gamesToPlay games =   do
 gamesToPlay':: Games -> Games
 gamesToPlay' games = (filter (\(Game round t location hometeam awayteam result ) -> result == Nothing ) games)
 
+--- The games remaining to play 
+standing:: IO Teams-> IO Games ->  String -> IO Standings
+standing teams games conf = do 
+                        games' <- games
+                        teams' <- teams
+                        return (standing' teams' games' conf)
+
+
+standing':: Teams-> Games -> String -> Standings 
+standing' teams games conf = let emptymap = (Map.fromList [])::Map.Map String  TeamScore
+                                 updatedmap =  foldl (\acc game  ->   prcoessGame teams game acc) emptymap games     
+                                 l = sort $  map(\x -> snd x)  $ Map.toList updatedmap                               
+                                 in  ( filter (\(TeamScore _ conf' points) -> conf == conf') l )
+
+
+
+--- process a single game add the point to the winning team
+prcoessGame:: Teams-> Game ->  Map.Map String TeamScore -> Map.Map String  TeamScore
+prcoessGame teams (Game round t location hometeam awayteam Nothing ) scoremap = scoremap
+prcoessGame teams (Game round t location hometeam awayteam (Just(home,away)) ) scoremap = let (wteam,lteam)  =  if home >away then (hometeam,  awayteam) else (awayteam,hometeam)                                                                                              
+                                                                                              wconf = getConf teams wteam
+                                                                                              lconf = getConf teams lteam                                                                                               
+                                                                                              updated = case Map.lookup wteam scoremap of 
+                                                                                                         Nothing -> Map.insert  wteam (TeamScore wteam wconf 1) scoremap
+                                                                                                         (Just (TeamScore _ conf points)) ->  Map.insert  wteam (TeamScore wteam conf (points + 1) ) scoremap
+                                                                                              updated2 = case Map.lookup lteam scoremap of 
+                                                                                                         Nothing -> Map.insert  lteam (TeamScore lteam lconf 0) updated
+                                                                                                         (Just (TeamScore _ conf points)) -> updated      
+                                                                                          in  updated2 
+
+getConf :: [Team] -> [Char] -> String                                                                                   
+getConf teams teamName  = let (Team name conference) = head $ filter ( \(Team name conference) -> name == teamName) teams
+                          in conference  
+
+
 g_teams = loadTeams "teams.csv"     
 g_games = loadGames "nba.csv"  g_teams                  
+
 
 
