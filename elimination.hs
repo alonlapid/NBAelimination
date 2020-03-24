@@ -128,7 +128,7 @@ cutofdate games s  = do
 cutofdate':: Games -> String -> Games
 cutofdate' games s =  case strtoTime  s of
                             Nothing -> error "Bad date- date should be provided the format of dd/mm/yyyy hh:mm "
-                            ( Just ltime) ->   map (\(Game round t location hometeam awayteam result ) -> if t >=  ( Just ltime) then  (Game round t location hometeam awayteam result ) else (Game round t location hometeam awayteam Nothing ) ) games    
+                            ( Just ltime) ->   map (\(Game round t location hometeam awayteam result ) -> if t <  ( Just ltime) then  (Game round t location hometeam awayteam result ) else (Game round t location hometeam awayteam Nothing ) ) games    
                         
 --- Convert a date string into a date
 strtoTime :: [Char] -> Maybe LocalTime
@@ -148,14 +148,7 @@ teams':: Games -> [String]
 teams' games =  let teams = map (\(Game  _ _ _  hometeam _ _) -> hometeam)  games
                     in  (foldr  (\x acc -> if elem x acc then acc else x:acc ) [] teams)
 
---- The games remaining to play 
-gamesToPlay:: IO Games -> IO Games
-gamesToPlay games =   do 
-                        games' <- games
-                        return (gamesToPlay' games')
 
-gamesToPlay':: Games -> Games
-gamesToPlay' games = (filter (\(Game round t location hometeam awayteam result ) -> result == Nothing ) games)
 
 --- The games remaining to play 
 standing:: IO Teams-> IO Games ->  String -> IO Standings
@@ -165,6 +158,7 @@ standing teams games conf = do
                         return (standing' teams' games' conf)
 
 
+--- Get the standing of the teams
 standing':: Teams-> Games -> String -> Standings 
 standing' teams games conf = let emptymap = (Map.fromList [])::Map.Map String  TeamScore
                                  updatedmap =  foldl (\acc game  ->   prcoessGame teams game acc) emptymap games     
@@ -173,7 +167,7 @@ standing' teams games conf = let emptymap = (Map.fromList [])::Map.Map String  T
 
 
 
---- process a single game add the point to the winning team
+--- process a single game and add the points to the winning team
 prcoessGame:: Teams-> Game ->  Map.Map String TeamScore -> Map.Map String  TeamScore
 prcoessGame teams (Game round t location hometeam awayteam Nothing ) scoremap = scoremap
 prcoessGame teams (Game round t location hometeam awayteam (Just(home,away)) ) scoremap = let (wteam,lteam)  =  if home >away then (hometeam,  awayteam) else (awayteam,hometeam)                                                                                              
@@ -186,14 +180,51 @@ prcoessGame teams (Game round t location hometeam awayteam (Just(home,away)) ) s
                                                                                                          Nothing -> Map.insert  lteam (TeamScore lteam lconf 0) updated
                                                                                                          (Just (TeamScore _ conf points)) -> updated      
                                                                                           in  updated2 
-
+--- Get the conference for the team
 getConf :: [Team] -> [Char] -> String                                                                                   
 getConf teams teamName  = let (Team name conference) = head $ filter ( \(Team name conference) -> name == teamName) teams
                           in conference  
 
 
+--- The games remaining to play 
+gamesToPlay:: IO Games -> IO Games
+gamesToPlay games =   do 
+                        games' <- games
+                        return (gamesToPlay' games')
+
+gamesToPlay':: Games -> Games
+gamesToPlay' games = (filter (\(Game round t location hometeam awayteam result ) -> result == Nothing ) games)
+
+--- tranform a pair into a canonical form.
+canonicalform:: Ord b => (b, b) -> (b, b)
+canonicalform (x,y) = if x < y then (x,y) else (y,x) 
+
+-- for a given list of games return a summary of the remaining  games to play. 
+gamesToPlaySummary:: IO Games -> IO  [(String,String,Int)]
+gamesToPlaySummary games = do 
+                               games' <- games 
+                               return (gamesToPlaySummary' games'  )                             
+
+
+gamesToPlaySummary':: Games -> [(String,String,Int)]
+gamesToPlaySummary' games =    let emptymap = (Map.fromList [])::Map.Map (String, String) Int
+                                   updatedmap = foldl (\acc game  ->   addgameToPlaySummary game acc) emptymap $ gamesToPlay' games
+                                   l =  (Map.toList updatedmap )   
+                                   in map(\((team1,team2),val) -> (team1,team2,val) ) l
+
+
+addgameToPlaySummary:: Num a => Game -> Map.Map (String, String) a -> Map.Map (String, String) a
+addgameToPlaySummary (Game round t location hometeam awayteam result) m =  let key = canonicalform (hometeam,awayteam)
+                                                                               updated  = case Map.lookup key m of 
+                                                                                            Nothing -> Map.insert  key 1 m 
+                                                                                            ((Just val) )->  Map.insert  key (1+val) m 
+                                                                           in updated                                                                                      
+
+
+                                                                                        
 g_teams = loadTeams "teams.csv"     
-g_games = loadGames "nba.csv"  g_teams                  
+g_games_all = loadGames "nba.csv"  g_teams   
+g_games = cutofdate g_games_all  "1/4/2019 20:00"               
 
 
 
